@@ -1,0 +1,37 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "cellpose-nested-layout-pipeline"
+version = "0.1.0"
+description = "Cellpose GPU batch segmentation and morphology/signal analysis for nested TIFF layouts."
+readme = "README.md"
+requires-python = ">=3.11,<3.13"
+dependencies = [
+    "cellpose>=4,<5",
+    "matplotlib>=3.8",
+    "numpy>=1.26,<3",
+    "scikit-image>=0.23",
+    "tifffile>=2024.2.12",
+]
+
+[project.optional-dependencies]
+gpu = ["torch==2.11.0"]
+
+[dependency-groups]
+dev = ["ruff>=0.11"]
+
+[tool.uv.sources]
+torch = [{ index = "pytorch-cu128", extra = "gpu" }]
+
+[[tool.uv.index]]
+name = "pytorch-cu128"
+url = "https://download.pytorch.org/whl/cu128"
+explicit = true
+
+[tool.uv]
+default-groups = []
+
+[tool.ruff]
+line-length = 100
