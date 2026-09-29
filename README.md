@@ -19,11 +19,15 @@ Each final-level folder may contain the three channel files for many images. Fil
 
 ## Install with uv
 
-Use Python 3.11 on Windows:
+Install uv on Windows
 
 ```powershell
-uv python install 3.11
-uv venv --python 3.11
+powershell -ExecutionPolicy ByPass -c "irm https://astral.sh/uv/install.ps1 | iex"
+```
+After installing, close and reopen the terminal, then check that `uv` works:
+
+```powershell
+uv --version
 uv sync --extra gpu
 uv run python scripts/check_gpu.py
 ```
