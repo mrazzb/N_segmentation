@@ -16,7 +16,7 @@ import batch_morphology_signal_analysis as pipeline
 # This is the folder containing treatment folders such as CsA, DMSO, or DTX.
 # Each treatment may contain any number of final-level folders such as A1, B1,
 # E1, E2, and so on. Every final-level folder is searched recursively.
-DATA_ROOT = Path(r'E:\N_segmentation\17032026_AnnV_PI_01_Split Scenes')
+DATA_ROOT = Path(r'E:\N_segmentation\Nouveau dossier (1)\Nouveau dossier')
 OUTPUT_DIR = DATA_ROOT.parent / f'{DATA_ROOT.name}_morphology_signal_results'
 MAX_IMAGES = None  # Set an integer for a small test run.
 CHANNEL_INDEX = 2
