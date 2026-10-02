@@ -19,11 +19,15 @@ Each final-level folder may contain the three channel files for many images. Fil
 
 ## Install with uv
 
-Use Python 3.11 on Windows:
+Install uv on Windows
 
 ```powershell
-uv python install 3.11
-uv venv --python 3.11
+powershell -ExecutionPolicy ByPass -c "irm https://astral.sh/uv/install.ps1 | iex"
+```
+After installing, close and reopen the terminal, then check that `uv` works:
+
+```powershell
+uv --version
 uv sync --extra gpu
 uv run python scripts/check_gpu.py
 ```
@@ -59,6 +63,7 @@ Official references:
 - https://pytorch.org/get-started/locally/
 - https://docs.astral.sh/uv/concepts/projects/dependencies/
 - https://cellpose.readthedocs.io/
+<<<<<<< HEAD
 
 ## Custom all-images batch script
 
@@ -123,3 +128,5 @@ uv run python scripts/regenerate_signal_threshold_results.py --results-dir "E:\N
 ~~~
 
 The script supports both cellpose_mask.tif and legacy *_cellpose_mask.tif mask filenames. The regenerated output contains replacement per-image and per-cell CSV tables, updated overlays, and processing_errors.csv.
+=======
+>>>>>>> e74ec3a86da1dd74d0700af9a142828b6fe3e7a8
