@@ -93,23 +93,20 @@ uv run python scripts/batch_custom_cellpose_signal_analysis.py `
 
 The output contains Cellpose masks, processed brightfield images, overlays, per-image counts, per-cell details, and `processing_errors.csv`. Overlay colors are cyan Cellpose boundaries, red C0 signal, green C1 signal, and yellow simultaneous C0+C1 signal.
 
+
 ## Regenerate signal results without Cellpose
 
-Use `scripts/regenerate_signal_threshold_results.py` when masks already exist and only the C0/C1 thresholds need to change. It reads the previous run's per-image and per-cell CSV files, reuses the saved masks, regenerates the overlays, and recalculates signal counts. Cellpose is not run again, and previous morphology labels are preserved.
+Use scripts/regenerate_signal_threshold_results.py when masks already exist and only the C0/C1 thresholds need to change. It reads the previous run's per-image and per-cell CSV files, reuses the saved masks, regenerates the overlays, and recalculates signal counts. Cellpose is not run again, and previous morphology labels are preserved.
 
 Run it with:
 
-```powershell
-uv run python scripts/regenerate_signal_threshold_results.py `
-  --results-dir "E:\N_segmentation\path\to\previous_results" `
-  --c0-threshold 300 `
-  --c1-threshold 500 `
-  --output-dir "E:\N_segmentation\path\to\threshold_regenerated"
-```
+~~~powershell
+uv run python scripts/regenerate_signal_threshold_results.py --results-dir "E:\N_segmentation\path\to\previous_results" --c0-threshold 300 --c1-threshold 500 --output-dir "E:\N_segmentation\path\to\threshold_regenerated"
+~~~
 
 The script also has editable defaults at the top:
 
-```python
+~~~python
 RESULTS_DIR = Path(r'E:\N_segmentation\path\to\previous_results')
 PER_IMAGE_CSV = RESULTS_DIR / 'per_image_morphology_signal_counts.csv'
 PER_CELL_CSV = RESULTS_DIR / 'per_cell_morphology_signal_details.csv'
@@ -117,6 +114,12 @@ OUTPUT_DIR = RESULTS_DIR / 'threshold_regenerated'
 
 C0_SIGNAL_THRESHOLD = 300
 C1_SIGNAL_THRESHOLD = 500
-```
+~~~
 
-The regenerated output contains replacement per-image and per-cell CSV tables, updated overlays, and `processing_errors.csv`.
+For older result folders whose per-image CSV does not contain source C0/C1/C2 columns, the script automatically searches RESULTS_DIR.parent for the original TIFF groups. If the original images are elsewhere, pass their root explicitly:
+
+~~~powershell
+uv run python scripts/regenerate_signal_threshold_results.py --results-dir "E:\N_segmentation\path\to\previous_results" --data-root "E:\N_segmentation\path\to\original_images" --max-images 1
+~~~
+
+The script supports both cellpose_mask.tif and legacy *_cellpose_mask.tif mask filenames. The regenerated output contains replacement per-image and per-cell CSV tables, updated overlays, and processing_errors.csv.

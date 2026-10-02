@@ -17,15 +17,14 @@ import batch_morphology_signal_analysis as pipeline
 
 
 # ----------------------------- Editable settings -----------------------------
-RESULTS_DIR = Path(
-    r'E:\N_segmentation\Nouveau dossier_custom_cellpose_results'
-)
+RESULTS_DIR = Path(r'E:\N_segmentation\Nouveau dossier (1)\Nouveau dossier\cellpose_morphology_signal_results')
 PER_IMAGE_CSV = RESULTS_DIR / 'per_image_morphology_signal_counts.csv'
 PER_CELL_CSV = RESULTS_DIR / 'per_cell_morphology_signal_details.csv'
 OUTPUT_DIR = RESULTS_DIR / 'threshold_regenerated'
 
-C0_SIGNAL_THRESHOLD = 300
-C1_SIGNAL_THRESHOLD = 300
+C0_SIGNAL_THRESHOLD = 100
+C1_SIGNAL_THRESHOLD = 800
+MAX_IMAGES = None  # Set an integer for a short validation run.
 # -----------------------------------------------------------------------------
 
 
@@ -56,7 +55,10 @@ def write_csv(path: Path, rows: list[dict], fields: list[str]) -> None:
 
 
 def resolve_source_path(value: object, results_dir: Path) -> Path:
-    path = Path(str(value or '').strip().strip('"')).expanduser()
+    text = str(value or '').strip().strip('"')
+    if not text:
+        return Path('')
+    path = Path(text).expanduser()
     if path.is_absolute():
         return path.resolve(strict=False)
     candidates = [
@@ -65,7 +67,7 @@ def resolve_source_path(value: object, results_dir: Path) -> Path:
         Path.cwd() / path,
     ]
     for candidate in candidates:
-        if candidate.exists():
+        if candidate.is_file():
             return candidate.resolve()
     return candidates[0].resolve(strict=False)
 
@@ -80,27 +82,102 @@ def find_channels_for_c2(c2_path: Path) -> dict[int, Path]:
     )
 
 
+def discover_source_groups(data_root: Path) -> dict[str, list[dict]]:
+    groups: dict[str, list[dict]] = {}
+    for key, channels in pipeline.find_channel_groups(data_root):
+        if not {0, 1, 2}.issubset(channels):
+            continue
+        folder, base, suffix = key
+        try:
+            relative = str(folder.resolve().relative_to(data_root.resolve()))
+        except ValueError:
+            relative = str(folder.resolve())
+        group = {
+            'channels': channels,
+            'relative_folder': relative,
+            'image_name': channels[2].stem,
+        }
+        groups.setdefault(group['image_name'].casefold(), []).append(group)
+    return groups
+
+
+def resolve_channels(
+    image_row: dict,
+    results_dir: Path,
+    data_root: Path,
+    source_groups: dict[str, list[dict]],
+) -> tuple[dict[int, Path], str]:
+    image_name = str(image_row.get('image_name', '')).strip()
+    c2_value = image_row.get('source_c2', '')
+    c2_path = resolve_source_path(c2_value, results_dir)
+
+    if c2_path.is_file():
+        channels = {2: c2_path}
+        for channel, column in ((0, 'source_c0'), (1, 'source_c1')):
+            value = image_row.get(column, '')
+            if value:
+                path = resolve_source_path(value, results_dir)
+                if path.is_file():
+                    channels[channel] = path
+        if not {0, 1}.issubset(channels):
+            try:
+                channels.update(find_channels_for_c2(c2_path))
+            except FileNotFoundError:
+                pass
+        if {0, 1, 2}.issubset(channels):
+            relative = image_row.get('relative_folder', '')
+            return channels, relative
+
+    candidates = source_groups.get(image_name.casefold(), [])
+    if len(candidates) > 1:
+        overlay_value = image_row.get('overlay_path', '')
+        overlay_path = resolve_source_path(overlay_value, results_dir)
+        hint = overlay_path.parent.name.casefold()
+        hinted = [
+            group for group in candidates
+            if hint.startswith(safe_name(group['relative_folder']).casefold() + '__')
+        ]
+        if len(hinted) == 1:
+            candidates = hinted
+    if len(candidates) != 1:
+        choices = ', '.join(
+            f"{group['relative_folder']} / {group['image_name']}"
+            for group in candidates
+        )
+        raise FileNotFoundError(
+            f'Could not infer source C0/C1/C2 files for {image_name!r} '
+            f'under {data_root}. Candidates: {choices or "none"}'
+        )
+    group = candidates[0]
+    return group['channels'], group['relative_folder']
+
+
 def find_mask_path(image_row: dict, results_dir: Path) -> Path:
     overlay_value = image_row.get('overlay_path', '')
     if overlay_value:
         overlay_path = resolve_source_path(overlay_value, results_dir)
-        candidate = overlay_path.parent / 'cellpose_mask.tif'
-        if candidate.exists():
-            return candidate
+        if overlay_path.is_file():
+            for pattern in ('cellpose_mask.tif', '*_cellpose_mask.tif'):
+                candidates = list(overlay_path.parent.glob(pattern))
+                if len(candidates) == 1:
+                    return candidates[0]
 
-    matches = list(results_dir.rglob('cellpose_mask.tif'))
+    matches = []
+    for pattern in ('cellpose_mask.tif', '*_cellpose_mask.tif'):
+        matches.extend(results_dir.rglob(pattern))
+    unique_matches = list(dict.fromkeys(matches))
     image_name = str(image_row.get('image_name', '')).casefold()
     matching_parent = [
-        path for path in matches
+        path for path in unique_matches
         if image_name and image_name in path.parent.name.casefold()
     ]
     if len(matching_parent) == 1:
         return matching_parent[0]
-    if len(matches) == 1:
-        return matches[0]
+    if len(unique_matches) == 1:
+        return unique_matches[0]
     raise FileNotFoundError(
-        f'Could not locate cellpose_mask.tif for image {image_name!r}. '
-        f'Expected it beside the previous overlay.'
+        f'Could not locate a Cellpose mask for image {image_name!r}. '
+        f'Expected cellpose_mask.tif or *_cellpose_mask.tif beside the previous overlay.'
     )
 
 
@@ -137,11 +214,12 @@ def make_summary(image: dict, records: list[dict], overlay_path: Path) -> dict:
     }
 
 
-def run(results_dir: Path, per_image_csv: Path, per_cell_csv: Path, output_dir: Path) -> None:
+def run(results_dir: Path, per_image_csv: Path, per_cell_csv: Path, output_dir: Path, data_root: Path | None = None, max_images: int | None = None) -> None:
     results_dir = results_dir.expanduser().resolve()
     per_image_csv = per_image_csv.expanduser().resolve()
     per_cell_csv = per_cell_csv.expanduser().resolve()
     output_dir = output_dir.expanduser().resolve()
+    data_root = (data_root or results_dir.parent).expanduser().resolve()
 
     if not per_image_csv.exists():
         raise FileNotFoundError(f'Per-image CSV was not found: {per_image_csv}')
@@ -150,7 +228,10 @@ def run(results_dir: Path, per_image_csv: Path, per_cell_csv: Path, output_dir: 
 
     image_rows = read_csv(per_image_csv)
     old_cell_rows = read_csv(per_cell_csv)
+    if max_images is not None:
+        image_rows = image_rows[:max_images]
     output_dir.mkdir(parents=True, exist_ok=True)
+    source_groups = discover_source_groups(data_root)
 
     # The previous batch output stores morphology labels. Reuse them so changing
     # thresholds does not change the morphology classification.
@@ -169,20 +250,7 @@ def run(results_dir: Path, per_image_csv: Path, per_cell_csv: Path, output_dir: 
     for index, image in enumerate(image_rows, start=1):
         image_name = image.get('image_name', f'image_{index:04d}')
         try:
-            c2_path = resolve_source_path(image.get('source_c2', ''), results_dir)
-            if not c2_path.exists():
-                raise FileNotFoundError(f'C2 source image was not found: {c2_path}')
-
-            channels = {}
-            if image.get('source_c0'):
-                channels[0] = resolve_source_path(image['source_c0'], results_dir)
-            if image.get('source_c1'):
-                channels[1] = resolve_source_path(image['source_c1'], results_dir)
-            channels[2] = c2_path
-            if 0 not in channels or 1 not in channels or not channels[0].exists() or not channels[1].exists():
-                discovered = find_channels_for_c2(c2_path)
-                channels.update(discovered)
-
+            channels, relative_folder = resolve_channels(image, results_dir, data_root, source_groups)
             c0 = pipeline.read_tiff_2d(channels[0])
             c1 = pipeline.read_tiff_2d(channels[1])
             c2 = pipeline.read_tiff_2d(channels[2])
@@ -210,6 +278,9 @@ def run(results_dir: Path, per_image_csv: Path, per_cell_csv: Path, output_dir: 
                     key = cell_key(channels[2], label, '')
                     old_cell = cells_by_key.get(key)
                 if old_cell is None:
+                    key = cell_key('', label, image_name)
+                    old_cell = cells_by_key.get(key)
+                if old_cell is None:
                     raise KeyError(
                         f'No previous per-cell row for {image_name!r}, label {label}.'
                     )
@@ -219,7 +290,7 @@ def run(results_dir: Path, per_image_csv: Path, per_cell_csv: Path, output_dir: 
                 c1_signal = bool(np.any(c1[cell] > C1_SIGNAL_THRESHOLD))
                 records.append({
                     'image_name': image_name,
-                    'relative_folder': image.get('relative_folder', ''),
+                    'relative_folder': relative_folder,
                     'source_c2': str(channels[2]),
                     'overlay_path': str(overlay_path),
                     'cellpose_label': label,
@@ -235,7 +306,7 @@ def run(results_dir: Path, per_image_csv: Path, per_cell_csv: Path, output_dir: 
 
             summaries.append(make_summary({
                 'image_name': image_name,
-                'relative_folder': image.get('relative_folder', ''),
+                'relative_folder': relative_folder,
                 'source_c0': str(channels[0]),
                 'source_c1': str(channels[1]),
                 'source_c2': str(channels[2]),
@@ -245,7 +316,7 @@ def run(results_dir: Path, per_image_csv: Path, per_cell_csv: Path, output_dir: 
         except Exception as error:
             errors.append({
                 'image_name': image_name,
-                'relative_folder': image.get('relative_folder', ''),
+                'relative_folder': relative_folder,
                 'error': f'{type(error).__name__}: {error}',
             })
             print(f'[{index}/{len(image_rows)}] FAILED {image_name}: {type(error).__name__}: {error}')
@@ -283,13 +354,15 @@ def main() -> None:
     parser.add_argument('--per-image-csv', type=Path, default=PER_IMAGE_CSV)
     parser.add_argument('--per-cell-csv', type=Path, default=PER_CELL_CSV)
     parser.add_argument('--output-dir', type=Path, default=OUTPUT_DIR)
+    parser.add_argument('--data-root', type=Path, default=RESULTS_DIR.parent)
+    parser.add_argument('--max-images', type=int, default=MAX_IMAGES)
     parser.add_argument('--c0-threshold', type=float, default=C0_SIGNAL_THRESHOLD)
     parser.add_argument('--c1-threshold', type=float, default=C1_SIGNAL_THRESHOLD)
     args = parser.parse_args()
 
     C0_SIGNAL_THRESHOLD = args.c0_threshold
     C1_SIGNAL_THRESHOLD = args.c1_threshold
-    run(args.results_dir, args.per_image_csv, args.per_cell_csv, args.output_dir)
+    run(args.results_dir, args.per_image_csv, args.per_cell_csv, args.output_dir, args.data_root, args.max_images)
 
 
 if __name__ == '__main__':
